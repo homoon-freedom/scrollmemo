@@ -43,20 +43,20 @@
             text-align: left;
         }
         
-        /* [스타일 변경] ### 대제목 */
+        /* ### 대제목 */
         .header-big { 
             display: block; font-size: 1.6em; font-weight: 900; 
             margin-top: 1em; margin-bottom: 0.5em; color: #111; line-height: 1.2;
         }
 
-        /* [스타일 변경] ## 중제목 (초록색 바) */
+        /* ## 중제목 (초록색 바) */
         .header-mid { 
             display: block; font-size: 1.25em; font-weight: 800; 
             margin-top: 1.2em; margin-bottom: 0.6em; color: #1a252f; 
             border-left: 5px solid var(--accent-color); padding-left: 12px; line-height: 1.4; 
         }
 
-        /* [스타일 변경] # 소제목 */
+        /* # 소제목 */
         .header-small { 
             display: block; font-size: 1.1em; font-weight: 800; 
             margin-top: 1em; margin-bottom: 0.4em; color: #34495e; line-height: 1.4;
@@ -90,7 +90,28 @@
         .card-footer { margin-top: 40px; font-size: 12px; color: #bdc3c7; text-align: center; border-top: 1px solid #f1f1f1; padding-top: 15px; }
 
         .save-toast { position: fixed; top: 80px; left: 50%; transform: translateX(-50%); background: #2ecc71; color: white; padding: 10px 25px; border-radius: 30px; display: none; z-index: 3000; }
-        .book-item { padding: 15px; border-bottom: 1px solid #eee; cursor: pointer; }
+        
+        .book-item { 
+            padding: 15px; 
+            border-bottom: 1px solid #eee; 
+            cursor: pointer; 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center; 
+        }
+        .book-item:hover { background: #f8f9fa; }
+        .book-item-title { flex: 1; margin-right: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        
+        .delete-btn { 
+            background: none; 
+            border: none; 
+            cursor: pointer; 
+            padding: 5px 8px; 
+            border-radius: 5px; 
+            font-size: 14px;
+            transition: background 0.2s;
+        }
+        .delete-btn:hover { background: #fee; }
     </style>
 </head>
 <body>
@@ -150,7 +171,6 @@
                 p = p.replace(/“(.*?)”/g, '“<span class="quote-highlight">$1</span>”');
                 
                 const trimmed = p.trim();
-                // [로직 변경] 기호가 많은 순서대로 먼저 체크하여 대/중/소 할당
                 if (trimmed.startsWith('###')) {
                     return `<span class="header-big">${p.replace(/^###\s*/, '')}</span>`;
                 } else if (trimmed.startsWith('##')) {
@@ -267,16 +287,35 @@
             }
         }
 
+        /* 저장 기능 수정 (제목 변경 기능 반영) */
         function saveCurrentBook() {
             const title = document.getElementById('book-title-input').value.trim() || "제목 없음";
             const id = currentBookId || 'eb_' + Date.now();
-            const content = isEditMode ? document.getElementById('editor-surface').innerText : rawContent;
-            localStorage.setItem(id, JSON.stringify({id, title, content}));
+            
+            // 편집 모드 상태에서 저장 버튼을 눌렀을 때를 위해 실시간 텍스트 동기화
+            if (isEditMode) {
+                rawContent = document.getElementById('editor-surface').innerText;
+            }
+            
+            // 1. 해당 ID의 책 데이터 본문과 제목 저장
+            localStorage.setItem(id, JSON.stringify({id, title, content: rawContent}));
+            
+            // 2. 서재 인덱스(목록) 정보 업데이트 로직 수정
             let index = JSON.parse(localStorage.getItem('eb_index') || '[]');
-            if (index.findIndex(i => i.id === id) === -1) index.push({id, title});
+            const idx = index.findIndex(i => i.id === id);
+            
+            if (idx === -1) {
+                // 완전히 새로운 글일 때 목록에 추가
+                index.push({id, title});
+            } else {
+                // 기존 글일 때 목록의 제목 수정본 반영
+                index[idx].title = title;
+            }
+            
             localStorage.setItem('eb_index', JSON.stringify(index));
             localStorage.setItem('eb_last_id', id);
-            currentBookId = id; showToast();
+            currentBookId = id; 
+            showToast();
         }
 
         function loadBook(id) {
@@ -288,12 +327,49 @@
 
         function openLibrary() {
             const index = JSON.parse(localStorage.getItem('eb_index') || '[]');
-            document.getElementById('book-list').innerHTML = index.map(b => `<div class="book-item" onclick="loadBook('${b.id}')">📘 ${b.title}</div>`).join('');
-            document.getElementById('library-modal').style.display = 'block'; document.getElementById('overlay').style.display = 'block';
+            if(index.length === 0) {
+                document.getElementById('book-list').innerHTML = '<div style="padding:15px; color:#999; text-align:center;">서재가 비어 있습니다.</div>';
+            } else {
+                document.getElementById('book-list').innerHTML = index.map(b => `
+                    <div class="book-item" onclick="loadBook('${b.id}')">
+                        <span class="book-item-title">📘 ${b.title}</span>
+                        <button class="delete-btn" onclick="deleteBook('${b.id}', event)">❌</button>
+                    </div>
+                `).join('');
+            }
+            document.getElementById('library-modal').style.display = 'block'; 
+            document.getElementById('overlay').style.display = 'block';
+        }
+
+        function deleteBook(id, event) {
+            event.stopPropagation(); 
+            if (!confirm("이 책을 서재에서 정말 삭제하시겠습니까?")) return;
+
+            localStorage.removeItem(id);
+
+            let index = JSON.parse(localStorage.getItem('eb_index') || '[]');
+            index = index.filter(b => b.id !== id);
+            localStorage.setItem('eb_index', JSON.stringify(index));
+
+            if (currentBookId === id) {
+                if (index.length > 0) {
+                    loadBook(index[0].id); 
+                } else {
+                    localStorage.removeItem('eb_last_id');
+                    createNewBook(); 
+                }
+            } else if (localStorage.getItem('eb_last_id') === id) {
+                if (index.length > 0) localStorage.setItem('eb_last_id', index[0].id);
+                else localStorage.removeItem('eb_last_id');
+            }
+
+            openLibrary();
         }
 
         function createNewBook() { currentBookId = null; rawContent = ""; document.getElementById('book-title-input').value = ""; document.getElementById('editor-surface').innerText = ""; if(!isEditMode) toggleEditMode(); closeModals(); }
         function adjustFont(v) { fontSize += (v*2); document.getElementById('editor-surface').style.fontSize = fontSize + 'px'; }
+        
+        // 모달 닫기 함수 오타 수정
         function closeModals() { document.querySelectorAll('.modal, .modal-overlay').forEach(el => el.style.display = 'none'); }
         function showToast() { const t = document.getElementById('save-toast'); t.style.display = 'block'; setTimeout(() => t.style.display = 'none', 1500); }
         
